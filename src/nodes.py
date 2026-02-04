@@ -213,11 +213,12 @@ class LyricsVideoGenerator(io.ComfyNode):
                 io.String.Input("filename_prefix", default="video/LyricsVideo")
             ],
             outputs=[], # Save to file
-            is_output_node=True 
+            is_output_node=True,
+            hidden=[io.Hidden.unique_id]
         )
 
     @classmethod
-    def execute(cls, image, audio, lyrics, font_size, font_color, scroll_speed, auto_speed, filename_prefix) -> io.NodeOutput:
+    def execute(cls, image, audio, lyrics, font_size, font_color, scroll_speed, auto_speed, filename_prefix, unique_id=None) -> io.NodeOutput:
         # Get the unique_id if possible? 
         # The execute method in V3 API doesn't pass hidden prompt_id/unique_id by default in args unless requested in define_schema?
         # Actually in V3, we don't have easy access to unique_id in execute unless we ask for it.
@@ -434,7 +435,8 @@ class LyricsVideoGenerator(io.ComfyNode):
         output_file = f"{filename}_{counter:05}_.mp4"
         output_path = os.path.join(full_output_folder, output_file)
         
-        final_video.write_videofile(output_path, fps=24, codec='libx264', audio_codec='aac')
+        logger = ComfyMoviePyLogger(unique_id) if unique_id else None
+        final_video.write_videofile(output_path, fps=24, codec='libx264', audio_codec='aac', logger=logger)
         
         # Clean up temp
         try:
