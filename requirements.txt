@@ -1,5 +1,6 @@
 mutagen
 moviepy
+imageio_ffmpeg
 numpy
 torch
 torchaudio
