@@ -301,7 +301,10 @@ class LyricsVideoGenerator(io.ComfyNode):
         # Text enters from the bottom (paste_y starts at h) and exits at the top
         # (paste_y ends at -total_text_height), total travel = total_text_height + h
         scroll_distance = total_text_height + h
-        effective_speed = scroll_distance / duration if auto_speed else scroll_speed
+        if auto_speed and duration > 0:
+            effective_speed = scroll_distance / duration
+        else:
+            effective_speed = float(scroll_speed)
 
         # 5. Frame generator — pure numpy compositing, no PIL per frame
         def make_frame(t):
