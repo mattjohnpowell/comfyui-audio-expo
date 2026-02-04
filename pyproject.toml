@@ -1,0 +1,22 @@
+[project]
+name = "comfyui-audio-expo"
+description = "A collection of custom audio nodes for ComfyUI including MP3 tagging and Lyrics Video generation."
+version = "0.1.0"
+license = { file = "LICENSE" }
+dependencies = [
+    "mutagen",
+    "moviepy",
+    "numpy",
+    "torch",
+    "torchaudio"
+]
+
+[project.urls]
+Repository = "https://github.com/mattjohnpowell/comfyui-audio-expo"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = "expo"
+DisplayName = "ComfyUI Audio Expo"
+nodes_file = "src/nodes.py"
+
