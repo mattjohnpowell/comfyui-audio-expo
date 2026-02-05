@@ -213,7 +213,7 @@ class LyricsVideoGenerator(io.ComfyNode):
             inputs=[
                 io.Image.Input("image", tooltip="Background image"),
                 io.Custom("AUDIO").Input("audio", tooltip="Audio track"),
-                io.String.Input("lyrics", multiline=True, tooltip="Lyrics to scroll"),
+                io.String.Input("lyrics", default="Enter lyrics here...", multiline=True, tooltip="Lyrics to scroll"),
                 io.Int.Input("font_size", default=40, min=10, max=200),
                 io.String.Input("font_color", default="white"),
                 io.Int.Input("outline_size", default=2, min=0, max=20, tooltip="Text outline thickness for readability (0 to disable)"),
@@ -254,6 +254,9 @@ class LyricsVideoGenerator(io.ComfyNode):
         h, w = bg_arr.shape[:2]
 
         # 3. Pre-render the full scrolling text strip ONCE
+        if not lyrics or not lyrics.strip() or lyrics.strip() == "Enter lyrics here...":
+            raise ValueError("Lyrics input is required. Please enter lyrics text.")
+
         lines = lyrics.split('\n')
         try:
             font = ImageFont.truetype("arial.ttf", font_size)
@@ -297,6 +300,15 @@ class LyricsVideoGenerator(io.ComfyNode):
         text_arr = np.array(text_img)  # [text_strip_h, text_strip_w, 4] RGBA
         x_offset = (w - text_strip_w) // 2
 
+        # Debug: save text strip and log key values for troubleshooting
+        debug_text_path = os.path.join(folder_paths.get_temp_directory(), f"debug_text_strip_{temp_id}.png")
+        text_img.save(debug_text_path)
+        alpha_max = int(text_arr[:, :, 3].max()) if text_strip_h > 0 else 0
+        alpha_nonzero = int((text_arr[:, :, 3] > 0).sum()) if text_strip_h > 0 else 0
+        print(f"[LyricsVideo] text_strip: {text_strip_w}x{text_strip_h}, viewport: {w}x{h}, lines: {len(lines)}")
+        print(f"[LyricsVideo] total_text_height: {total_text_height}, alpha_max: {alpha_max}, non-zero alpha pixels: {alpha_nonzero}")
+        print(f"[LyricsVideo] debug text strip saved to: {debug_text_path}")
+
         # 4. Calculate scroll speed
         # Text enters from the bottom (paste_y starts at h) and exits at the top
         # (paste_y ends at -total_text_height), total travel = total_text_height + h
@@ -305,6 +317,8 @@ class LyricsVideoGenerator(io.ComfyNode):
             effective_speed = scroll_distance / duration
         else:
             effective_speed = float(scroll_speed)
+
+        print(f"[LyricsVideo] speed: {effective_speed:.2f} px/s, duration: {duration:.1f}s, scroll_distance: {scroll_distance}")
 
         # 5. Frame generator — pure numpy compositing, no PIL per frame
         def make_frame(t):
@@ -333,6 +347,13 @@ class LyricsVideoGenerator(io.ComfyNode):
             frame[dst_y:dst_y + vis_h, dst_x:dst_x + vis_w] = blended
 
             return frame
+
+        # Debug: save a mid-point frame to verify compositing
+        debug_frame = make_frame(duration / 2)
+        debug_frame_img = Image.fromarray(debug_frame)
+        debug_frame_path = os.path.join(folder_paths.get_temp_directory(), f"debug_frame_mid_{temp_id}.png")
+        debug_frame_img.save(debug_frame_path)
+        print(f"[LyricsVideo] debug mid-point frame saved to: {debug_frame_path}")
 
         # 6. Build video clip with audio attached
         video_clip = VideoClip(make_frame, duration=duration)
