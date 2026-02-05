@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-audio-expo"
 description = "A collection of custom audio nodes for ComfyUI including MP3 tagging and Lyrics Video generation."
-version = "0.1.0"
+version = "0.1.1"
 license = { file = "LICENSE" }
 dependencies = [
     "mutagen",
