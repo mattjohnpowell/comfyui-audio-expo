@@ -39,7 +39,6 @@ try:
 except ImportError:
     PromptServer = None
 
-from comfy_api.latest import io, ui
 
 class ComfyMoviePyLogger(ProgressBarLogger):
     def __init__(self, node_unique_id=None):
@@ -51,6 +50,7 @@ class ComfyMoviePyLogger(ProgressBarLogger):
             total = self.bars[bar]['total']
             if total > 0:
                 PromptServer.instance.send_sync("progress", {"value": value, "max": total, "node": self.node_unique_id})
+
 
 def save_wav_native(filepath, waveform, sample_rate):
     """
@@ -76,37 +76,39 @@ def save_wav_native(filepath, waveform, sample_rate):
 
     with wave.open(filepath, 'wb') as wf:
         wf.setnchannels(channels)
-        wf.setsampwidth(2) # 2 bytes for int16
+        wf.setsampwidth(2)  # 2 bytes for int16
         wf.setframerate(sample_rate)
         wf.writeframes(data.tobytes())
 
 
-class SaveAudioWithTags(io.ComfyNode):
-    @classmethod
-    def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="SaveAudioWithTags",
-            display_name="Save Audio (MP3 w/ Tags)",
-            category="Audio/Expo",
-            description="Saves audio as MP3 and adds metadata tags like artist, title, lyrics, and cover art.",
-            inputs=[
-                io.Custom("AUDIO").Input("audio"),
-                io.Image.Input("cover_image", optional=True, tooltip="Cover art image to embed in the MP3"),
-                io.String.Input("filename_prefix", default="audio/ComfyUI"),
-                io.String.Input("artist", default="Unknown Artist"),
-                io.String.Input("title", default="Unknown Title"),
-                io.String.Input("album", default="Unknown Album"),
-                io.String.Input("year", default="2024"),
-                io.String.Input("genre", default="Experimental"),
-                io.String.Input("bpm", default=""),
-                io.String.Input("lyrics", default="", multiline=True, optional=True),
-            ],
-            outputs=[],
-            is_output_node=True
-        )
+class SaveAudioWithTags:
+    """Saves audio as MP3 and adds metadata tags like artist, title, lyrics, and cover art."""
 
     @classmethod
-    def execute(cls, audio, filename_prefix, artist, title, album, year, genre, bpm, cover_image=None, lyrics=None) -> io.NodeOutput:
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "audio": ("AUDIO",),
+                "filename_prefix": ("STRING", {"default": "audio/ComfyUI"}),
+                "artist": ("STRING", {"default": "Unknown Artist"}),
+                "title": ("STRING", {"default": "Unknown Title"}),
+                "album": ("STRING", {"default": "Unknown Album"}),
+                "year": ("STRING", {"default": "2024"}),
+                "genre": ("STRING", {"default": "Experimental"}),
+                "bpm": ("STRING", {"default": ""}),
+            },
+            "optional": {
+                "cover_image": ("IMAGE",),
+                "lyrics": ("STRING", {"default": "", "multiline": True}),
+            }
+        }
+
+    RETURN_TYPES = ()
+    FUNCTION = "save_audio"
+    OUTPUT_NODE = True
+    CATEGORY = "Audio/Expo"
+
+    def save_audio(self, audio, filename_prefix, artist, title, album, year, genre, bpm, cover_image=None, lyrics=None):
         if not MUTAGEN_AVAILABLE:
             raise ImportError("Mutagen is required for tagging. Please install it: pip install mutagen")
 
@@ -176,7 +178,7 @@ class SaveAudioWithTags(io.ComfyNode):
         tags.add(TCON(encoding=3, text=genre))
 
         if bpm and str(bpm).strip():
-             tags.add(TBPM(encoding=3, text=str(bpm)))
+            tags.add(TBPM(encoding=3, text=str(bpm)))
 
         if lyrics and str(lyrics).strip():
             tags.add(USLT(encoding=3, lang='eng', desc='', text=lyrics))
@@ -199,38 +201,40 @@ class SaveAudioWithTags(io.ComfyNode):
 
         tags.save(mp3_file_path)
 
-        return io.NodeOutput()
+        return {}
 
 
-class LyricsVideoGenerator(io.ComfyNode):
-    @classmethod
-    def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="LyricsVideoGenerator",
-            display_name="Lyrics Video Generator",
-            category="Audio/Expo",
-            description="Generates an MP4 video with scrolling lyrics over a static image.",
-            inputs=[
-                io.Image.Input("image", tooltip="Background image"),
-                io.Custom("AUDIO").Input("audio", tooltip="Audio track"),
-                io.String.Input("lyrics", default="Enter lyrics here...", multiline=True, tooltip="Lyrics to scroll"),
-                io.Int.Input("font_size", default=40, min=10, max=200),
-                io.String.Input("font_color", default="white"),
-                io.Int.Input("outline_size", default=2, min=0, max=20, tooltip="Text outline thickness for readability (0 to disable)"),
-                io.String.Input("outline_color", default="black", tooltip="Text outline color"),
-                io.Int.Input("scroll_speed", default=50, min=1, max=500, tooltip="Speed of scrolling in pixels per second (override)"),
-                io.Boolean.Input("auto_speed", default=True, tooltip="Calculate speed to fit lyrics to audio duration"),
-                io.String.Input("filename_prefix", default="video/LyricsVideo")
-            ],
-            outputs=[],
-            is_output_node=True,
-            hidden=[io.Hidden.unique_id]
-        )
+class LyricsVideoGenerator:
+    """Generates an MP4 video with scrolling lyrics over a static image."""
 
     @classmethod
-    def execute(cls, image, audio, lyrics, font_size, font_color, outline_size, outline_color, scroll_speed, auto_speed, filename_prefix, unique_id=None) -> io.NodeOutput:
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "audio": ("AUDIO",),
+                "lyrics": ("STRING", {"default": "Enter lyrics here...", "multiline": True}),
+                "font_size": ("INT", {"default": 40, "min": 10, "max": 200}),
+                "font_color": ("STRING", {"default": "white"}),
+                "outline_size": ("INT", {"default": 2, "min": 0, "max": 20}),
+                "outline_color": ("STRING", {"default": "black"}),
+                "scroll_speed": ("INT", {"default": 50, "min": 1, "max": 500}),
+                "auto_speed": ("BOOLEAN", {"default": True}),
+                "filename_prefix": ("STRING", {"default": "video/LyricsVideo"}),
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
+            }
+        }
+
+    RETURN_TYPES = ()
+    FUNCTION = "generate_video"
+    OUTPUT_NODE = True
+    CATEGORY = "Audio/Expo"
+
+    def generate_video(self, image, audio, lyrics, font_size, font_color, outline_size, outline_color, scroll_speed, auto_speed, filename_prefix, unique_id=None):
         if not MOVIEPY_AVAILABLE:
-             raise ImportError("MoviePy is required. Please install it: pip install moviepy")
+            raise ImportError("MoviePy is required. Please install it: pip install moviepy")
 
         # 1. Prepare Audio
         waveform = audio["waveform"]
@@ -380,4 +384,4 @@ class LyricsVideoGenerator(io.ComfyNode):
         except OSError:
             pass
 
-        return io.NodeOutput()
+        return {}
