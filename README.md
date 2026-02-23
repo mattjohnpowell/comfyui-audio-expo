@@ -33,6 +33,7 @@ Generates an `.mp4` video with a scrolling lyrics overlay on top of a background
   - `scroll_speed`: Manual scroll speed (pixels per second).
   - `auto_speed`: If True, calculates speed to ensure the text scrolls completely within the audio duration.
   - `filename_prefix`: Prefix for the saved video file.
+  - `play_in_player`: (Optional, default off) When enabled, opens the rendered MP4 in your system's default video player immediately after saving. Non-blocking — generation continues without waiting.
 
 ### 3. Open Audio in Player
 Opens any `AUDIO` tensor in the system's default media player, non-blocking. Passes audio through so it can be placed anywhere in a chain.
@@ -44,14 +45,20 @@ Useful for an **infinite generative radio** workflow: chain a music generation n
 - **Inputs**: `audio`
 - **Output**: `audio` (pass-through)
 
-## Infinite Radio Workflow
+## Infinite Radio / Infinite Karaoke Workflow
 
 Connect nodes like this for continuous generative playback:
 
+**Audio only (infinite radio):**
 ```
-[Music Gen] ──▶ [Save Audio (MP3 w/ Tags)] ──▶ [Open Audio in Player]
-                   (play_in_player = on)              (optional, for
-                                                        raw audio chains)
+[Music Gen] ──▶ [Save Audio (MP3 w/ Tags)]
+                   (play_in_player = on)
+```
+
+**With visuals (infinite karaoke):**
+```
+[Music Gen] ──▶ [Lyrics Video Generator] ──▶ ...
+                   (play_in_player = on)
 ```
 
 Each track opens non-blocking in your default player (e.g. VLC, Windows Media Player), which queues them automatically as they arrive.

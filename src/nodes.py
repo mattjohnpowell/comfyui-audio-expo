@@ -246,6 +246,9 @@ class LyricsVideoGenerator:
                 "auto_speed": ("BOOLEAN", {"default": True}),
                 "filename_prefix": ("STRING", {"default": "video/LyricsVideo"}),
             },
+            "optional": {
+                "play_in_player": ("BOOLEAN", {"default": False, "label_on": "Play after render", "label_off": "Don't play"}),
+            },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
             }
@@ -256,7 +259,7 @@ class LyricsVideoGenerator:
     OUTPUT_NODE = True
     CATEGORY = "Audio/Expo"
 
-    def generate_video(self, image, audio, lyrics, font_size, font_color, outline_size, outline_color, scroll_speed, auto_speed, filename_prefix, unique_id=None):
+    def generate_video(self, image, audio, lyrics, font_size, font_color, outline_size, outline_color, scroll_speed, auto_speed, filename_prefix, play_in_player=False, unique_id=None):
         if not MOVIEPY_AVAILABLE:
             raise ImportError("MoviePy is required. Please install it: pip install moviepy")
 
@@ -324,18 +327,18 @@ class LyricsVideoGenerator:
             )
             y_cursor += line_heights[i]
 
-        # Convert text image to numpy ONCE — this is the key performance optimization.
+        # Convert text image to numpy ONCE and pre-compute alpha weights.
         text_arr = np.array(text_img)  # [text_strip_h, text_strip_w, 4] RGBA
         x_offset = (w - text_strip_w) // 2
 
-        # Debug: save text strip and log key values for troubleshooting
-        debug_text_path = os.path.join(folder_paths.get_temp_directory(), f"debug_text_strip_{temp_id}.png")
-        text_img.save(debug_text_path)
-        alpha_max = int(text_arr[:, :, 3].max()) if text_strip_h > 0 else 0
-        alpha_nonzero = int((text_arr[:, :, 3] > 0).sum()) if text_strip_h > 0 else 0
         print(f"[LyricsVideo] text_strip: {text_strip_w}x{text_strip_h}, viewport: {w}x{h}, lines: {len(lines)}")
-        print(f"[LyricsVideo] total_text_height: {total_text_height}, alpha_max: {alpha_max}, non-zero alpha pixels: {alpha_nonzero}")
-        print(f"[LyricsVideo] debug text strip saved to: {debug_text_path}")
+
+        # Pre-compute alpha blending weights ONCE — avoids per-frame float conversions.
+        # text_premult = text_rgb * alpha  (pre-multiplied)
+        # one_minus_alpha = 1 - alpha      (background weight)
+        _alpha     = text_arr[:, :, 3:4].astype(np.float32) * (1.0 / 255.0)  # [H, W, 1]
+        _text_pm   = text_arr[:, :, :3].astype(np.float32) * _alpha           # [H, W, 3]
+        _one_m_a   = 1.0 - _alpha                                              # [H, W, 1]
 
         # 4. Calculate scroll speed
         # Text enters from the bottom (paste_y starts at h) and exits at the top
@@ -348,12 +351,10 @@ class LyricsVideoGenerator:
 
         print(f"[LyricsVideo] speed: {effective_speed:.2f} px/s, duration: {duration:.1f}s, scroll_distance: {scroll_distance}")
 
-        # 5. Frame generator — pure numpy compositing, no PIL per frame
+        # 5. Frame generator — pre-multiplied alpha composite, minimal allocations.
         def make_frame(t):
-            frame = bg_arr.copy()
             paste_y = int(h - effective_speed * t)
 
-            # Calculate overlap between text strip and the viewport
             src_y = max(0, -paste_y)
             dst_y = max(0, paste_y)
             src_x = max(0, -x_offset)
@@ -362,26 +363,20 @@ class LyricsVideoGenerator:
             vis_h = min(text_strip_h - src_y, h - dst_y)
             vis_w = min(text_strip_w - src_x, w - dst_x)
 
+            # When text is entirely off-screen return the background directly —
+            # no allocation needed (MoviePy reads but does not mutate the array).
             if vis_h <= 0 or vis_w <= 0:
-                return frame  # No text visible this frame
+                return bg_arr
 
-            # Alpha-blend text onto background using numpy vectorized ops
-            text_slice = text_arr[src_y:src_y + vis_h, src_x:src_x + vis_w]
-            alpha = text_slice[:, :, 3:4].astype(np.float32) * (1.0 / 255.0)
-            text_rgb = text_slice[:, :, :3].astype(np.float32)
-            bg_region = frame[dst_y:dst_y + vis_h, dst_x:dst_x + vis_w].astype(np.float32)
+            # Only allocate a full frame copy when text is actually visible.
+            frame = bg_arr.copy()
 
-            blended = (text_rgb * alpha + bg_region * (1.0 - alpha)).astype(np.uint8)
-            frame[dst_y:dst_y + vis_h, dst_x:dst_x + vis_w] = blended
+            pm_slice  = _text_pm [src_y:src_y + vis_h, src_x:src_x + vis_w]   # pre-mult RGB
+            oma_slice = _one_m_a [src_y:src_y + vis_h, src_x:src_x + vis_w]   # 1-alpha
+            bg_region = frame    [dst_y:dst_y + vis_h, dst_x:dst_x + vis_w].astype(np.float32)
 
+            frame[dst_y:dst_y + vis_h, dst_x:dst_x + vis_w] = (pm_slice + bg_region * oma_slice).astype(np.uint8)
             return frame
-
-        # Debug: save a mid-point frame to verify compositing
-        debug_frame = make_frame(duration / 2)
-        debug_frame_img = Image.fromarray(debug_frame)
-        debug_frame_path = os.path.join(folder_paths.get_temp_directory(), f"debug_frame_mid_{temp_id}.png")
-        debug_frame_img.save(debug_frame_path)
-        print(f"[LyricsVideo] debug mid-point frame saved to: {debug_frame_path}")
 
         # 6. Build video clip with audio attached
         video_clip = VideoClip(make_frame, duration=duration)
@@ -399,7 +394,15 @@ class LyricsVideoGenerator:
         output_path = os.path.join(full_output_folder, output_file)
 
         logger = ComfyMoviePyLogger(unique_id) if unique_id else None
-        video_clip.write_videofile(output_path, fps=24, codec='libx264', audio_codec='aac', logger=logger)
+        video_clip.write_videofile(
+            output_path,
+            fps=24,
+            codec='libx264',
+            audio_codec='aac',
+            preset='ultrafast',     # ~10-20x faster encode vs default 'medium'
+            threads=os.cpu_count() or 4,
+            logger=logger,
+        )
 
         # 8. Clean up
         audio_clip.close()
@@ -407,6 +410,9 @@ class LyricsVideoGenerator:
             os.remove(temp_audio_path)
         except OSError:
             pass
+
+        if play_in_player:
+            _open_in_default_player(output_path)
 
         return {}
 
@@ -437,9 +443,6 @@ class OpenAudioInPlayer:
     CATEGORY = "Audio/Expo"
 
     def open_in_player(self, audio):
-        import platform
-        import subprocess
-
         waveform = audio["waveform"]
         sample_rate = audio["sample_rate"]
 
