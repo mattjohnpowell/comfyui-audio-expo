@@ -385,3 +385,69 @@ class LyricsVideoGenerator:
             pass
 
         return {}
+
+
+class OpenAudioInPlayer:
+    """
+    Opens audio in the system's default media player (non-blocking).
+    Passes AUDIO through for chaining — useful for building an 'infinite radio'
+    workflow where each generated track auto-plays as it finishes.
+
+    NOTE: This plays on the machine running ComfyUI. For local instances this
+    works great; for remote/cloud servers the audio will play there, not in
+    your browser.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "audio": ("AUDIO",),
+            }
+        }
+
+    RETURN_TYPES = ("AUDIO",)
+    RETURN_NAMES = ("audio",)
+    FUNCTION = "open_in_player"
+    OUTPUT_NODE = True
+    CATEGORY = "Audio/Expo"
+
+    def open_in_player(self, audio):
+        import platform
+        import subprocess
+
+        waveform = audio["waveform"]
+        sample_rate = audio["sample_rate"]
+
+        if waveform.is_cuda:
+            waveform = waveform.cpu()
+        if waveform.dim() == 3:
+            waveform = waveform[0]
+
+        # Write to a named temp file that persists long enough for the player to open it.
+        # Using the ComfyUI temp directory keeps things tidy.
+        temp_path = os.path.join(
+            folder_paths.get_temp_directory(),
+            f"play_audio_{uuid.uuid4().hex[:8]}.wav"
+        )
+        save_wav_native(temp_path, waveform, sample_rate)
+
+        system = platform.system()
+        try:
+            if system == "Windows":
+                # os.startfile is Windows-only and non-blocking
+                os.startfile(temp_path)
+            elif system == "Darwin":
+                # macOS — 'open' launches the default app and returns immediately
+                subprocess.Popen(["open", temp_path])
+            else:
+                # Linux / FreeBSD etc. — xdg-open defers to the desktop default
+                subprocess.Popen(["xdg-open", temp_path])
+
+            print(f"[OpenAudioInPlayer] Opened in default player: {temp_path} (platform: {system})")
+        except Exception as e:
+            # Never hard-fail — audio generation should not be blocked by playback errors
+            print(f"[OpenAudioInPlayer] Could not open audio player: {e}")
+
+        # Pass audio through so this node can sit anywhere in a chain
+        return (audio,)
