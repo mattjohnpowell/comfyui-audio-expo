@@ -1,5 +1,7 @@
 import os
 import uuid
+import platform
+import subprocess
 import torch
 import torchaudio
 import numpy as np
@@ -38,6 +40,24 @@ try:
     from server import PromptServer
 except ImportError:
     PromptServer = None
+
+
+def _open_in_default_player(filepath: str) -> None:
+    """
+    Opens a file in the system's default media player, non-blocking.
+    Never raises — a broken player setup should not crash generation.
+    """
+    try:
+        system = platform.system()
+        if system == "Windows":
+            os.startfile(filepath)
+        elif system == "Darwin":
+            subprocess.Popen(["open", filepath])
+        else:
+            subprocess.Popen(["xdg-open", filepath])
+        print(f"[AudioExpo] Sent to default player ({system}): {filepath}")
+    except Exception as e:
+        print(f"[AudioExpo] Could not open audio player: {e}")
 
 
 class ComfyMoviePyLogger(ProgressBarLogger):
@@ -100,6 +120,7 @@ class SaveAudioWithTags:
             "optional": {
                 "cover_image": ("IMAGE",),
                 "lyrics": ("STRING", {"default": "", "multiline": True}),
+                "play_in_player": ("BOOLEAN", {"default": False, "label_on": "Play after save", "label_off": "Don't play"}),
             }
         }
 
@@ -108,7 +129,7 @@ class SaveAudioWithTags:
     OUTPUT_NODE = True
     CATEGORY = "Audio/Expo"
 
-    def save_audio(self, audio, filename_prefix, artist, title, album, year, genre, bpm, cover_image=None, lyrics=None):
+    def save_audio(self, audio, filename_prefix, artist, title, album, year, genre, bpm, cover_image=None, lyrics=None, play_in_player=False):
         if not MUTAGEN_AVAILABLE:
             raise ImportError("Mutagen is required for tagging. Please install it: pip install mutagen")
 
@@ -200,6 +221,9 @@ class SaveAudioWithTags:
             ))
 
         tags.save(mp3_file_path)
+
+        if play_in_player:
+            _open_in_default_player(mp3_file_path)
 
         return {}
 
@@ -432,22 +456,7 @@ class OpenAudioInPlayer:
         )
         save_wav_native(temp_path, waveform, sample_rate)
 
-        system = platform.system()
-        try:
-            if system == "Windows":
-                # os.startfile is Windows-only and non-blocking
-                os.startfile(temp_path)
-            elif system == "Darwin":
-                # macOS — 'open' launches the default app and returns immediately
-                subprocess.Popen(["open", temp_path])
-            else:
-                # Linux / FreeBSD etc. — xdg-open defers to the desktop default
-                subprocess.Popen(["xdg-open", temp_path])
-
-            print(f"[OpenAudioInPlayer] Opened in default player: {temp_path} (platform: {system})")
-        except Exception as e:
-            # Never hard-fail — audio generation should not be blocked by playback errors
-            print(f"[OpenAudioInPlayer] Could not open audio player: {e}")
+        _open_in_default_player(temp_path)
 
         # Pass audio through so this node can sit anywhere in a chain
         return (audio,)
