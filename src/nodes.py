@@ -42,20 +42,64 @@ except ImportError:
     PromptServer = None
 
 
-def _open_in_default_player(filepath: str) -> None:
+# Common Windows Media Player locations
+_WMP_PATHS = [
+    r"C:\Program Files\Windows Media Player\wmplayer.exe",
+    r"C:\Program Files (x86)\Windows Media Player\wmplayer.exe",
+]
+
+# Common VLC locations (Windows)
+_VLC_PATHS = [
+    r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+    r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe",
+]
+
+
+def _find_exe(names: list) -> str | None:
+    """Return the first path that exists on disk, or None."""
+    for p in names:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _open_in_default_player(filepath: str, queue: bool = True) -> None:
     """
     Opens a file in the system's default media player, non-blocking.
+
+    When queue=True (default) on Windows, tries to enqueue rather than
+    interrupt current playback:
+      1. Windows Media Player  wmplayer.exe /QUEUE
+      2. VLC                   vlc.exe --playlist-enqueue
+      3. os.startfile fallback (opens/replaces, as before)
+
     Never raises — a broken player setup should not crash generation.
     """
     try:
         system = platform.system()
         if system == "Windows":
-            os.startfile(filepath)
+            queued = False
+            if queue:
+                wmp = _find_exe(_WMP_PATHS)
+                if wmp:
+                    subprocess.Popen([wmp, "/QUEUE", filepath])
+                    print(f"[AudioExpo] Queued in WMP: {filepath}")
+                    queued = True
+                else:
+                    vlc = _find_exe(_VLC_PATHS)
+                    if vlc:
+                        subprocess.Popen([vlc, "--playlist-enqueue", filepath])
+                        print(f"[AudioExpo] Queued in VLC: {filepath}")
+                        queued = True
+            if not queued:
+                os.startfile(filepath)
+                print(f"[AudioExpo] Opened via os.startfile: {filepath}")
         elif system == "Darwin":
             subprocess.Popen(["open", filepath])
+            print(f"[AudioExpo] Opened on macOS: {filepath}")
         else:
             subprocess.Popen(["xdg-open", filepath])
-        print(f"[AudioExpo] Sent to default player ({system}): {filepath}")
+            print(f"[AudioExpo] Opened via xdg-open: {filepath}")
     except Exception as e:
         print(f"[AudioExpo] Could not open audio player: {e}")
 
@@ -223,7 +267,7 @@ class SaveAudioWithTags:
         tags.save(mp3_file_path)
 
         if play_in_player:
-            _open_in_default_player(mp3_file_path)
+            _open_in_default_player(mp3_file_path, queue=True)
 
         return {}
 
@@ -412,7 +456,7 @@ class LyricsVideoGenerator:
             pass
 
         if play_in_player:
-            _open_in_default_player(output_path)
+            _open_in_default_player(output_path, queue=True)
 
         return {}
 
@@ -459,7 +503,7 @@ class OpenAudioInPlayer:
         )
         save_wav_native(temp_path, waveform, sample_rate)
 
-        _open_in_default_player(temp_path)
+        _open_in_default_player(temp_path, queue=True)
 
         # Pass audio through so this node can sit anywhere in a chain
         return (audio,)
