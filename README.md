@@ -1,7 +1,7 @@
 # ComfyUI Audio Expo
 
 A collection of custom nodes for ComfyUI focused on Audio and Video generation post-processing.
-This pack allows you to save audio with rich metadata (ID3 tags, cover art) and generate "karaoke-style" scrolling lyric videos.
+This pack allows you to save audio with rich metadata (ID3 tags, cover art), generate "karaoke-style" scrolling lyric videos, and send generated tracks straight to your system's default media player — perfect for building an infinite generative radio workflow.
 
 ## Nodes
 
@@ -15,9 +15,10 @@ Saves generated audio as an MP3 file with embedded ID3 metadata.
   - `album`: Album name tag.
   - `year`: Year tag.
   - `genre`: Genre tag.
-  - `lyrics`: (Optional) Lyrics text to embed in the USLT frame.
   - `bpm`: (Optional) Beats Per Minute to embed.
-  - `image`: (Optional) An image to embed as the MP3 Cover Art (Front Cover).
+  - `cover_image`: (Optional) An image to embed as the MP3 Cover Art (Front Cover).
+  - `lyrics`: (Optional) Lyrics text to embed in the USLT frame.
+  - `play_in_player`: (Optional, default off) When enabled, opens the saved MP3 in your system's default media player immediately after saving. Non-blocking — generation continues without waiting.
 
 ### 2. Lyrics Video Generator
 Generates an `.mp4` video with a scrolling lyrics overlay on top of a background image.
@@ -27,8 +28,33 @@ Generates an `.mp4` video with a scrolling lyrics overlay on top of a background
   - `lyrics`: Text to scroll.
   - `font_size`: Size of the text.
   - `font_color`: Hex code or color name for the text.
-  - `scroll_speed`: Manual scroll speed (pixels per frame).
+  - `outline_size`: Stroke width around each character.
+  - `outline_color`: Stroke colour.
+  - `scroll_speed`: Manual scroll speed (pixels per second).
   - `auto_speed`: If True, calculates speed to ensure the text scrolls completely within the audio duration.
+  - `filename_prefix`: Prefix for the saved video file.
+
+### 3. Open Audio in Player
+Opens any `AUDIO` tensor in the system's default media player, non-blocking. Passes audio through so it can be placed anywhere in a chain.
+
+Useful for an **infinite generative radio** workflow: chain a music generation node into `Save Audio (MP3 w/ Tags)` (with `play_in_player` on), or use this node standalone to preview audio mid-chain. Each generated track is queued in your media player as it finishes, while ComfyUI continues generating the next one.
+
+> **Note:** Playback happens on the machine running ComfyUI. This works best for local instances. Remote/cloud deployments will play audio server-side.
+
+- **Inputs**: `audio`
+- **Output**: `audio` (pass-through)
+
+## Infinite Radio Workflow
+
+Connect nodes like this for continuous generative playback:
+
+```
+[Music Gen] ──▶ [Save Audio (MP3 w/ Tags)] ──▶ [Open Audio in Player]
+                   (play_in_player = on)              (optional, for
+                                                        raw audio chains)
+```
+
+Each track opens non-blocking in your default player (e.g. VLC, Windows Media Player), which queues them automatically as they arrive.
 
 ## Installation
 
