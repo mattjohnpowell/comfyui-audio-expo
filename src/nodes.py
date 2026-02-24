@@ -1,6 +1,7 @@
 import os
 import uuid
 import platform
+import shutil
 import subprocess
 import torch
 import torchaudio
@@ -42,64 +43,91 @@ except ImportError:
     PromptServer = None
 
 
-# Common Windows Media Player locations
+# Known VLC install paths per platform (checked if 'vlc' is not on PATH)
+_VLC_KNOWN_PATHS = {
+    "Windows": [
+        r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+        r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe",
+    ],
+    "Darwin": [
+        "/Applications/VLC.app/Contents/MacOS/VLC",
+    ],
+    "Linux": [
+        "/usr/bin/vlc",
+        "/usr/local/bin/vlc",
+        "/snap/bin/vlc",
+    ],
+}
+
+# Windows Media Player locations (Windows-only queue fallback)
 _WMP_PATHS = [
     r"C:\Program Files\Windows Media Player\wmplayer.exe",
     r"C:\Program Files (x86)\Windows Media Player\wmplayer.exe",
 ]
 
-# Common VLC locations (Windows)
-_VLC_PATHS = [
-    r"C:\Program Files\VideoLAN\VLC\vlc.exe",
-    r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe",
-]
 
-
-def _find_exe(names: list) -> str | None:
-    """Return the first path that exists on disk, or None."""
-    for p in names:
+def _find_exe(paths: list) -> str | None:
+    """Return the first path in the list that exists on disk, or None."""
+    for p in paths:
         if os.path.isfile(p):
             return p
     return None
+
+
+def _find_vlc() -> str | None:
+    """
+    Locate the VLC executable.
+    Checks PATH first (shutil.which), then known install locations.
+    """
+    # shutil.which works on all platforms and respects PATH
+    via_path = shutil.which("vlc")
+    if via_path:
+        return via_path
+    system = platform.system()
+    return _find_exe(_VLC_KNOWN_PATHS.get(system, []))
 
 
 def _open_in_default_player(filepath: str, queue: bool = True) -> None:
     """
     Opens a file in the system's default media player, non-blocking.
 
-    When queue=True (default) on Windows, tries to enqueue rather than
-    interrupt current playback:
-      1. Windows Media Player  wmplayer.exe /QUEUE
-      2. VLC                   vlc.exe --playlist-enqueue
-      3. os.startfile fallback (opens/replaces, as before)
+    Priority when queue=True:
+      1. VLC  (all platforms) — --playlist-enqueue adds to queue without
+             interrupting current playback
+      2. Windows Media Player (Windows only) — /QUEUE flag
+      3. OS native opener as last resort (os.startfile / open / xdg-open)
+         — this interrupts playback on most players
 
     Never raises — a broken player setup should not crash generation.
     """
     try:
         system = platform.system()
-        if system == "Windows":
-            queued = False
-            if queue:
+
+        if queue:
+            # --- VLC (cross-platform, preferred) ---
+            vlc = _find_vlc()
+            if vlc:
+                subprocess.Popen([vlc, "--playlist-enqueue", filepath])
+                print(f"[AudioExpo] Queued in VLC ({system}): {filepath}")
+                return
+
+            # --- WMP fallback (Windows only) ---
+            if system == "Windows":
                 wmp = _find_exe(_WMP_PATHS)
                 if wmp:
                     subprocess.Popen([wmp, "/QUEUE", filepath])
                     print(f"[AudioExpo] Queued in WMP: {filepath}")
-                    queued = True
-                else:
-                    vlc = _find_exe(_VLC_PATHS)
-                    if vlc:
-                        subprocess.Popen([vlc, "--playlist-enqueue", filepath])
-                        print(f"[AudioExpo] Queued in VLC: {filepath}")
-                        queued = True
-            if not queued:
-                os.startfile(filepath)
-                print(f"[AudioExpo] Opened via os.startfile: {filepath}")
+                    return
+
+        # --- OS native opener (last resort / queue=False) ---
+        if system == "Windows":
+            os.startfile(filepath)
         elif system == "Darwin":
             subprocess.Popen(["open", filepath])
-            print(f"[AudioExpo] Opened on macOS: {filepath}")
         else:
             subprocess.Popen(["xdg-open", filepath])
-            print(f"[AudioExpo] Opened via xdg-open: {filepath}")
+        print(f"[AudioExpo] Opened via OS default ({system}): {filepath}")
+
     except Exception as e:
         print(f"[AudioExpo] Could not open audio player: {e}")
 

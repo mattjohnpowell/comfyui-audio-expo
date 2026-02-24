@@ -41,6 +41,13 @@ Opens any `AUDIO` tensor in the system's default media player, non-blocking. Pas
 Useful for an **infinite generative radio** workflow: chain a music generation node into `Save Audio (MP3 w/ Tags)` (with `play_in_player` on), or use this node standalone to preview audio mid-chain. Each generated track is queued in your media player as it finishes, while ComfyUI continues generating the next one.
 
 > **Note:** Playback happens on the machine running ComfyUI. This works best for local instances. Remote/cloud deployments will play audio server-side.
+>
+> **Queue behaviour:** When `play_in_player` is enabled, the node attempts to *enqueue* into an already-running player rather than interrupting current playback. Priority order:
+> 1. **VLC** (recommended, all platforms) — `--playlist-enqueue`. Works on Windows, macOS, and Linux.
+> 2. **Windows Media Player** (Windows fallback) — `/QUEUE` flag.
+> 3. **OS default opener** (last resort) — may interrupt current playback.
+>
+> Install VLC for the best cross-platform experience: https://www.videolan.org/vlc/
 
 - **Inputs**: `audio`
 - **Output**: `audio` (pass-through)
