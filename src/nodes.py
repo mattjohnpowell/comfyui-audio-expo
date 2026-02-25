@@ -143,7 +143,7 @@ def _open_in_default_player(filepath: str, player: str = "Auto") -> None:
         if player == "VLC":
             vlc = _find_vlc()
             if vlc:
-                subprocess.Popen([vlc, "--playlist-enqueue", filepath])
+                subprocess.Popen([vlc, "--one-instance", "--playlist-enqueue", filepath])
                 print(f"[AudioExpo] Queued in VLC: {filepath}")
             else:
                 print(f"[AudioExpo] WARNING: VLC not found. File not opened: {filepath}")
@@ -181,7 +181,7 @@ def _open_in_default_player(filepath: str, player: str = "Auto") -> None:
         print(f"[AudioExpo] Auto chain ({_AUTO_CHAIN}): {filepath}")
         vlc = _find_vlc()
         if vlc:
-            subprocess.Popen([vlc, "--playlist-enqueue", filepath])
+            subprocess.Popen([vlc, "--one-instance", "--playlist-enqueue", filepath])
             print(f"[AudioExpo] Auto: queued in VLC")
             return
         if system == "Windows":
