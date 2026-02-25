@@ -59,7 +59,25 @@ _VLC_KNOWN_PATHS = {
     ],
 }
 
-# Windows Media Player locations (Windows-only queue fallback)
+# Known mpv install paths per platform
+_MPV_KNOWN_PATHS = {
+    "Windows": [
+        r"C:\Program Files\mpv\mpv.exe",
+        r"C:\Program Files (x86)\mpv\mpv.exe",
+    ],
+    "Darwin": [
+        "/Applications/mpv.app/Contents/MacOS/mpv",
+        "/usr/local/bin/mpv",
+        "/opt/homebrew/bin/mpv",
+    ],
+    "Linux": [
+        "/usr/bin/mpv",
+        "/usr/local/bin/mpv",
+        "/snap/bin/mpv",
+    ],
+}
+
+# Windows Media Player locations (Windows-only)
 _WMP_PATHS = [
     r"C:\Program Files\Windows Media Player\wmplayer.exe",
     r"C:\Program Files (x86)\Windows Media Player\wmplayer.exe",
@@ -75,58 +93,115 @@ def _find_exe(paths: list) -> str | None:
 
 
 def _find_vlc() -> str | None:
-    """
-    Locate the VLC executable.
-    Checks PATH first (shutil.which), then known install locations.
-    """
-    # shutil.which works on all platforms and respects PATH
+    """Locate VLC: checks PATH first, then known install locations."""
     via_path = shutil.which("vlc")
     if via_path:
         return via_path
-    system = platform.system()
-    return _find_exe(_VLC_KNOWN_PATHS.get(system, []))
+    return _find_exe(_VLC_KNOWN_PATHS.get(platform.system(), []))
 
 
-def _open_in_default_player(filepath: str, queue: bool = True) -> None:
+def _find_mpv() -> str | None:
+    """Locate mpv: checks PATH first, then known install locations."""
+    via_path = shutil.which("mpv")
+    if via_path:
+        return via_path
+    return _find_exe(_MPV_KNOWN_PATHS.get(platform.system(), []))
+
+
+# Player options exposed in node dropdowns — built once at load time so
+# platform-irrelevant options (e.g. WMP on macOS) never appear.
+_SYSTEM = platform.system()
+_BASE_PLAYER_OPTIONS = ["Auto", "VLC", "mpv", "System Default"]
+if _SYSTEM == "Windows":
+    _BASE_PLAYER_OPTIONS.insert(2, "Windows Media Player")  # after VLC
+PLAYER_OPTIONS: list[str] = _BASE_PLAYER_OPTIONS
+
+# Auto-chain description varies by platform (used in docstrings/logs only)
+_AUTO_CHAIN = {
+    "Windows": "VLC → WMP → mpv → System",
+    "Darwin":  "VLC → mpv → System",
+    "Linux":   "VLC → mpv → System",
+}.get(_SYSTEM, "VLC → mpv → System")
+
+
+def _open_in_default_player(filepath: str, player: str = "Auto") -> None:
     """
-    Opens a file in the system's default media player, non-blocking.
+    Opens a file in a media player, non-blocking.
 
-    Priority when queue=True:
-      1. VLC  (all platforms) — --playlist-enqueue adds to queue without
-             interrupting current playback
-      2. Windows Media Player (Windows only) — /QUEUE flag
-      3. OS native opener as last resort (os.startfile / open / xdg-open)
-         — this interrupts playback on most players
+    player options:
+      "Auto"                  Try VLC, then WMP (Windows), then mpv, then OS default
+      "VLC"                   Force VLC with --playlist-enqueue
+      "mpv"                   Force mpv with --playlist-end (append to queue)
+      "Windows Media Player"  Force WMP with /QUEUE  (Windows only)
+      "System Default"        OS native opener (os.startfile / open / xdg-open)
 
     Never raises — a broken player setup should not crash generation.
     """
     try:
         system = platform.system()
 
-        if queue:
-            # --- VLC (cross-platform, preferred) ---
+        if player == "VLC":
             vlc = _find_vlc()
             if vlc:
                 subprocess.Popen([vlc, "--playlist-enqueue", filepath])
-                print(f"[AudioExpo] Queued in VLC ({system}): {filepath}")
-                return
+                print(f"[AudioExpo] Queued in VLC: {filepath}")
+            else:
+                print(f"[AudioExpo] WARNING: VLC not found. File not opened: {filepath}")
+            return
 
-            # --- WMP fallback (Windows only) ---
+        if player == "mpv":
+            mpv = _find_mpv()
+            if mpv:
+                subprocess.Popen([mpv, "--playlist-end", filepath])
+                print(f"[AudioExpo] Queued in mpv: {filepath}")
+            else:
+                print(f"[AudioExpo] WARNING: mpv not found. File not opened: {filepath}")
+            return
+
+        if player == "Windows Media Player":
+            wmp = _find_exe(_WMP_PATHS)
+            if wmp:
+                subprocess.Popen([wmp, "/QUEUE", filepath])
+                print(f"[AudioExpo] Queued in WMP: {filepath}")
+            else:
+                print(f"[AudioExpo] WARNING: WMP not found. File not opened: {filepath}")
+            return
+
+        if player == "System Default":
             if system == "Windows":
-                wmp = _find_exe(_WMP_PATHS)
-                if wmp:
-                    subprocess.Popen([wmp, "/QUEUE", filepath])
-                    print(f"[AudioExpo] Queued in WMP: {filepath}")
-                    return
+                os.startfile(filepath)
+            elif system == "Darwin":
+                subprocess.Popen(["open", filepath])
+            else:
+                subprocess.Popen(["xdg-open", filepath])
+            print(f"[AudioExpo] Opened via OS default ({system}): {filepath}")
+            return
 
-        # --- OS native opener (last resort / queue=False) ---
+        # --- Auto: VLC → WMP (Windows) → mpv → OS default ---
+        print(f"[AudioExpo] Auto chain ({_AUTO_CHAIN}): {filepath}")
+        vlc = _find_vlc()
+        if vlc:
+            subprocess.Popen([vlc, "--playlist-enqueue", filepath])
+            print(f"[AudioExpo] Auto: queued in VLC")
+            return
+        if system == "Windows":
+            wmp = _find_exe(_WMP_PATHS)
+            if wmp:
+                subprocess.Popen([wmp, "/QUEUE", filepath])
+                print(f"[AudioExpo] Auto: queued in WMP")
+                return
+        mpv = _find_mpv()
+        if mpv:
+            subprocess.Popen([mpv, "--playlist-end", filepath])
+            print(f"[AudioExpo] Auto: queued in mpv")
+            return
         if system == "Windows":
             os.startfile(filepath)
         elif system == "Darwin":
             subprocess.Popen(["open", filepath])
         else:
             subprocess.Popen(["xdg-open", filepath])
-        print(f"[AudioExpo] Opened via OS default ({system}): {filepath}")
+        print(f"[AudioExpo] Auto: opened via OS default ({system})")
 
     except Exception as e:
         print(f"[AudioExpo] Could not open audio player: {e}")
@@ -193,6 +268,7 @@ class SaveAudioWithTags:
                 "cover_image": ("IMAGE",),
                 "lyrics": ("STRING", {"default": "", "multiline": True}),
                 "play_in_player": ("BOOLEAN", {"default": False, "label_on": "Play after save", "label_off": "Don't play"}),
+                "player": (PLAYER_OPTIONS, {"default": "Auto"}),
             }
         }
 
@@ -201,7 +277,7 @@ class SaveAudioWithTags:
     OUTPUT_NODE = True
     CATEGORY = "Audio/Expo"
 
-    def save_audio(self, audio, filename_prefix, artist, title, album, year, genre, bpm, cover_image=None, lyrics=None, play_in_player=False):
+    def save_audio(self, audio, filename_prefix, artist, title, album, year, genre, bpm, cover_image=None, lyrics=None, play_in_player=False, player="Auto"):
         if not MUTAGEN_AVAILABLE:
             raise ImportError("Mutagen is required for tagging. Please install it: pip install mutagen")
 
@@ -295,7 +371,7 @@ class SaveAudioWithTags:
         tags.save(mp3_file_path)
 
         if play_in_player:
-            _open_in_default_player(mp3_file_path, queue=True)
+            _open_in_default_player(mp3_file_path, player=player)
 
         return {}
 
@@ -320,7 +396,7 @@ class LyricsVideoGenerator:
             },
             "optional": {
                 "play_in_player": ("BOOLEAN", {"default": False, "label_on": "Play after render", "label_off": "Don't play"}),
-            },
+                "player": (PLAYER_OPTIONS, {"default": "Auto"}),            },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
             }
@@ -331,7 +407,7 @@ class LyricsVideoGenerator:
     OUTPUT_NODE = True
     CATEGORY = "Audio/Expo"
 
-    def generate_video(self, image, audio, lyrics, font_size, font_color, outline_size, outline_color, scroll_speed, auto_speed, filename_prefix, play_in_player=False, unique_id=None):
+    def generate_video(self, image, audio, lyrics, font_size, font_color, outline_size, outline_color, scroll_speed, auto_speed, filename_prefix, play_in_player=False, player="Auto", unique_id=None):
         if not MOVIEPY_AVAILABLE:
             raise ImportError("MoviePy is required. Please install it: pip install moviepy")
 
@@ -484,7 +560,7 @@ class LyricsVideoGenerator:
             pass
 
         if play_in_player:
-            _open_in_default_player(output_path, queue=True)
+            _open_in_default_player(output_path, player=player)
 
         return {}
 
@@ -505,7 +581,7 @@ class OpenAudioInPlayer:
         return {
             "required": {
                 "audio": ("AUDIO",),
-            }
+                "player": (PLAYER_OPTIONS, {"default": "Auto"}),            }
         }
 
     RETURN_TYPES = ("AUDIO",)
@@ -514,7 +590,7 @@ class OpenAudioInPlayer:
     OUTPUT_NODE = True
     CATEGORY = "Audio/Expo"
 
-    def open_in_player(self, audio):
+    def open_in_player(self, audio, player="Auto"):
         waveform = audio["waveform"]
         sample_rate = audio["sample_rate"]
 
@@ -531,7 +607,7 @@ class OpenAudioInPlayer:
         )
         save_wav_native(temp_path, waveform, sample_rate)
 
-        _open_in_default_player(temp_path, queue=True)
+        _open_in_default_player(temp_path, player=player)
 
         # Pass audio through so this node can sit anywhere in a chain
         return (audio,)

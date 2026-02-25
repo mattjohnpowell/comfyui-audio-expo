@@ -42,12 +42,19 @@ Useful for an **infinite generative radio** workflow: chain a music generation n
 
 > **Note:** Playback happens on the machine running ComfyUI. This works best for local instances. Remote/cloud deployments will play audio server-side.
 >
-> **Queue behaviour:** When `play_in_player` is enabled, the node attempts to *enqueue* into an already-running player rather than interrupting current playback. Priority order:
-> 1. **VLC** (recommended, all platforms) — `--playlist-enqueue`. Works on Windows, macOS, and Linux.
-> 2. **Windows Media Player** (Windows fallback) — `/QUEUE` flag.
-> 3. **OS default opener** (last resort) — may interrupt current playback.
+> **Queue behaviour:** When `play_in_player` is enabled, use the `player` dropdown to control which app receives the file. The dropdown is platform-aware — options unavailable on your OS won’t appear.
 >
-> Install VLC for the best cross-platform experience: https://www.videolan.org/vlc/
+> | Option | Platforms | Behaviour |
+> |---|---|---|
+> | `Auto` | All | Tries VLC → WMP (Windows) → mpv → OS default in order |
+> | `VLC` | All | `--playlist-enqueue` — adds to queue without interrupting playback |
+> | `mpv` | All | `--playlist-end` — appends to current playlist |
+> | `Windows Media Player` | Windows only | `/QUEUE` flag |
+> | `System Default` | All | OS native opener — may interrupt current playback |
+>
+> **Recommended:** Install VLC (all platforms) or mpv for proper queue support.
+> - VLC: https://www.videolan.org/vlc/
+> - mpv: https://mpv.io/
 
 - **Inputs**: `audio`
 - **Output**: `audio` (pass-through)
